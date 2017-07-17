@@ -135,9 +135,15 @@ def evaluate(hps):
       continue
     if not (ckpt_state and ckpt_state.model_checkpoint_path):
       tf.logging.info('No model to eval yet at %s', FLAGS.log_root)
-      continue
+      break
     tf.logging.info('Loading checkpoint %s', ckpt_state.model_checkpoint_path)
     saver.restore(sess, ckpt_state.model_checkpoint_path)
+
+    global_step = ckpt_state.model_checkpoint_path.split('/')[-1].split('-')[-1]
+    if not global_step.isdigit():
+      global_step = 0
+    else:
+      global_step = int(global_step)
 
     total_prediction, correct_prediction = 0, 0
     for _ in six.moves.range(FLAGS.eval_batch_count):
@@ -162,8 +168,8 @@ def evaluate(hps):
         tag='Best Precision', simple_value=best_precision)
     summary_writer.add_summary(best_precision_summ, train_step)
     summary_writer.add_summary(summaries, train_step)
-    tf.logging.info('loss: %.3f, precision: %.3f, best precision: %.3f' %
-                    (loss, precision, best_precision))
+    print('Precision @ 1 = %.4f, Recall @ 5 = %.4f, Global step = %d' %
+          (precision, 0.0, global_step))
     summary_writer.flush()
 
     if FLAGS.eval_once:
