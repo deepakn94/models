@@ -45,6 +45,10 @@ tf.app.flags.DEFINE_string('log_root', '',
                            'parent directory of FLAGS.train_dir/eval_dir.')
 tf.app.flags.DEFINE_integer('num_gpus', 0,
                             'Number of gpus used for training. (0 or 1)')
+tf.app.flags.DEFINE_integer('save_checkpoint_secs', 450,
+                            'The frequency, in seconds, that a checkpoint is saved.')
+tf.app.flags.DEFINE_bool('use_bottleneck', False,
+                         'Use bottleneck module or not.')
 
 
 def train(hps):
@@ -80,11 +84,13 @@ def train(hps):
                'precision': precision},
       every_n_iter=100)
 
+  num_steps_per_epoch = 391  # TODO: Don't hardcode this.
+
   class _LearningRateSetterHook(tf.train.SessionRunHook):
     """Sets learning_rate based on global step."""
 
     def begin(self):
-      self._lrn_rate = 0.1
+      self._lrn_rate = 0.01
 
     def before_run(self, run_context):
       return tf.train.SessionRunArgs(
@@ -93,11 +99,14 @@ def train(hps):
 
     def after_run(self, run_context, run_values):
       train_step = run_values.results
-      if train_step < 40000:
-        self._lrn_rate = 0.1
-      elif train_step < 60000:
+      num_steps_per_epoch = 391
+      if train_step < num_steps_per_epoch:
         self._lrn_rate = 0.01
-      elif train_step < 80000:
+      elif train_step < (91 * num_steps_per_epoch):
+        self._lrn_rate = 0.1
+      elif train_step < (136 * num_steps_per_epoch):
+        self._lrn_rate = 0.01
+      elif train_step < (181 * num_steps_per_epoch):
         self._lrn_rate = 0.001
       else:
         self._lrn_rate = 0.0001
@@ -106,11 +115,12 @@ def train(hps):
       checkpoint_dir=FLAGS.log_root,
       hooks=[logging_hook, _LearningRateSetterHook()],
       chief_only_hooks=[summary_hook],
+      save_checkpoint_secs=hps.save_checkpoint_secs,
       # Since we provide a SummarySaverHook, we need to disable default
       # SummarySaverHook. To do that we set save_summaries_steps to 0.
       save_summaries_steps=0,
       config=tf.ConfigProto(allow_soft_placement=True)) as mon_sess:
-    while not mon_sess.should_stop():
+    for i in xrange(num_steps_per_epoch * 181):
       mon_sess.run(model.train_op)
 
 
@@ -201,10 +211,11 @@ def main(_):
                              min_lrn_rate=0.0001,
                              lrn_rate=0.1,
                              num_residual_units=5,
-                             use_bottleneck=False,
+                             use_bottleneck=FLAGS.use_bottleneck,
                              weight_decay_rate=0.0002,
                              relu_leakiness=0.1,
-                             optimizer='mom')
+                             optimizer='mom',
+                             save_checkpoint_secs=FLAGS.save_checkpoint_secs)
 
   with tf.device(dev):
     if FLAGS.mode == 'train':
