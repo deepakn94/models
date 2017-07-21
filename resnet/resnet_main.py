@@ -120,7 +120,7 @@ def train(hps):
       # SummarySaverHook. To do that we set save_summaries_steps to 0.
       save_summaries_steps=0,
       config=tf.ConfigProto(allow_soft_placement=True)) as mon_sess:
-    for i in xrange(num_steps_per_epoch * 181):
+    for i in range(num_steps_per_epoch * 181):
       mon_sess.run(model.train_op)
 
 
