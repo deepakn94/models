@@ -27,6 +27,7 @@ import tensorflow as tf
 FLAGS = tf.app.flags.FLAGS
 tf.app.flags.DEFINE_string('dataset', 'cifar10', 'cifar10 or cifar100.')
 tf.app.flags.DEFINE_string('mode', 'train', 'train or eval.')
+tf.app.flags.DEFINE_string('model', '', 'model to train.')
 tf.app.flags.DEFINE_string('train_data_path', '',
                            'Filepattern for training data.')
 tf.app.flags.DEFINE_string('eval_data_path', '',
@@ -189,6 +190,9 @@ def evaluate(hps):
 
 
 def main(_):
+  if FLAGS.model == '':
+    raise Exception('--model must be specified.')
+
   if FLAGS.num_gpus == 0:
     dev = '/cpu:0'
   elif FLAGS.num_gpus == 1:
@@ -206,11 +210,22 @@ def main(_):
   elif FLAGS.dataset == 'cifar100':
     num_classes = 100
 
+  if FLAGS.model == 'resnet20':
+    num_residual_units = 3
+  elif FLAGS.model == 'resnet56':
+    num_residual_units = 9
+  elif FLAGS.model == 'resnet164' and FLAGS.use_bottleneck:
+    num_residual_units = 18
+  elif FLAGS.model == 'resnet164' and not FLAGS.use_bottleneck:
+    num_residual_units = 27
+  else:
+    raise Exception("Invalid model -- only resnet20, resnet56 and resnet164 supported")
+
   hps = resnet_model.HParams(batch_size=batch_size,
                              num_classes=num_classes,
                              min_lrn_rate=0.0001,
                              lrn_rate=0.1,
-                             num_residual_units=5,
+                             num_residual_units=num_residual_units,
                              use_bottleneck=FLAGS.use_bottleneck,
                              weight_decay_rate=0.0002,
                              relu_leakiness=0.1,
