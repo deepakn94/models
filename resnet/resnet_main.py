@@ -156,18 +156,23 @@ def evaluate(hps):
     else:
       global_step = int(global_step)
 
-    total_prediction, correct_prediction = 0, 0
+    total_prediction, correct_prediction, correct_prediction_top5 = 0, 0, 0
     for _ in six.moves.range(FLAGS.eval_batch_count):
       (summaries, loss, predictions, truth, train_step) = sess.run(
           [model.summaries, model.cost, model.predictions,
            model.labels, model.global_step])
 
-      truth = np.argmax(truth, axis=1)
-      predictions = np.argmax(predictions, axis=1)
-      correct_prediction += np.sum(truth == predictions)
-      total_prediction += predictions.shape[0]
+      for (indiv_truth, indiv_prediction) in zip(truth, predictions):
+        indiv_truth = np.argmax(indiv_truth)
+        top5_prediction = np.argsort(indiv_prediction)[-5:]
+        top1_prediction = np.argsort(indiv_prediction)[-1]
+        correct_prediction += (indiv_truth == top1_prediction)
+        if indiv_truth in top5_prediction:
+          correct_prediction_top5 += 1
+        total_prediction += 1
 
     precision = 1.0 * correct_prediction / total_prediction
+    precision_top5 = 1.0 * correct_prediction_top5 / total_prediction
     best_precision = max(precision, best_precision)
 
     precision_summ = tf.Summary()
@@ -180,7 +185,7 @@ def evaluate(hps):
     summary_writer.add_summary(best_precision_summ, train_step)
     summary_writer.add_summary(summaries, train_step)
     print('Precision @ 1 = %.4f, Recall @ 5 = %.4f, Global step = %d' %
-          (precision, 0.0, global_step))
+          (precision, precision_top5, global_step))
     summary_writer.flush()
 
     if FLAGS.eval_once:
