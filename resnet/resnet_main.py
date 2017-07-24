@@ -232,7 +232,7 @@ def main(_):
                              lrn_rate=0.1,
                              num_residual_units=num_residual_units,
                              use_bottleneck=FLAGS.use_bottleneck,
-                             weight_decay_rate=0.0002,
+                             weight_decay_rate=0.0005,
                              relu_leakiness=0.1,
                              optimizer='mom',
                              save_checkpoint_secs=FLAGS.save_checkpoint_secs)
