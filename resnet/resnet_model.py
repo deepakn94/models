@@ -32,7 +32,7 @@ from tensorflow.python.training import moving_averages
 HParams = namedtuple('HParams',
                      'batch_size, num_classes, min_lrn_rate, lrn_rate, '
                      'num_residual_units, use_bottleneck, weight_decay_rate, '
-                     'relu_leakiness, optimizer, save_checkpoint_secs')
+                     'relu_leakiness, optimizer, save_checkpoint_secs, num_gpus')
 
 
 class ResNet(object):
@@ -56,17 +56,39 @@ class ResNet(object):
 
   def build_graph(self):
     """Build a whole graph for the model."""
-    self.global_step = tf.contrib.framework.get_or_create_global_step()
-    self._build_model()
+    with tf.device('/cpu:0'):
+      with tf.variable_scope('global', reuse=None):
+        self.global_step = tf.contrib.framework.get_or_create_global_step()
+
+        self.lrn_rate = tf.constant(self.hps.lrn_rate, tf.float32)
+        tf.summary.scalar('learning_rate', self.lrn_rate)
+        if self.hps.optimizer == 'sgd':
+          optimizer = tf.train.GradientDescentOptimizer(self.lrn_rate)
+        elif self.hps.optimizer == 'mom':
+          optimizer = tf.train.MomentumOptimizer(self.lrn_rate, 0.9)
+
+    tower_grads = []
+    with tf.variable_scope(tf.get_variable_scope()):
+      for i in range(self.hps.num_gpus):
+        with tf.device('/gpu:%d' % i):
+          with tf.name_scope('tower_%d' % i) as scope:
+            loss = self._build_model(i)
+            tf.get_variable_scope().reuse_variables()
+            if self.mode == 'train':
+              grads = optimizer.compute_gradients(loss)
+              tower_grads.append(grads)
+
     if self.mode == 'train':
-      self._build_train_op()
+      average_grads = self._average_grads(tower_grads)
+      self._apply_grads(optimizer, average_grads)
+
     self.summaries = tf.summary.merge_all()
 
   def _stride_arr(self, stride):
     """Map a stride scalar to the stride array for tf.nn.conv2d."""
     return [1, stride, stride, 1]
 
-  def _build_model(self):
+  def _build_model(self, gpu_id):
     """Build the core model within the graph."""
     with tf.variable_scope('init'):
       x = self._images
@@ -115,31 +137,50 @@ class ResNet(object):
 
     with tf.variable_scope('logit'):
       logits = self._fully_connected(x, self.hps.num_classes)
-      self.predictions = tf.nn.softmax(logits)
+      if gpu_id == 0:
+        self.predictions = tf.nn.softmax(logits)
 
     with tf.variable_scope('costs'):
       xent = tf.nn.softmax_cross_entropy_with_logits(
           logits=logits, labels=self.labels)
-      self.cost = tf.reduce_mean(xent, name='xent')
-      self.cost += self._decay()
+      loss = tf.reduce_mean(xent, name='xent')
+      loss += self._decay()
+      if gpu_id == 0:
+        self.loss = loss
 
-      tf.summary.scalar('cost', self.cost)
+      tf.summary.scalar('loss', loss)
 
-  def _build_train_op(self):
-    """Build training specific ops for the graph."""
-    self.lrn_rate = tf.constant(self.hps.lrn_rate, tf.float32)
-    tf.summary.scalar('learning_rate', self.lrn_rate)
+    return loss
 
-    trainable_variables = tf.trainable_variables()
-    grads = tf.gradients(self.cost, trainable_variables)
+  def _average_grads(self, tower_grads):
+    """Calculate the average gradient for each shared variable across all towers."""
+    average_grads = []
+    for grad_and_vars in zip(*tower_grads):
+      # Note that each grad_and_vars looks like the following:
+      #   ((grad0_gpu0, var0_gpu0), ... , (grad0_gpuN, var0_gpuN))
+      grads = []
+      for g, _ in grad_and_vars:
+        # Add 0 dimension to the gradients to represent the tower.
+        expanded_g = tf.expand_dims(g, 0)
 
-    if self.hps.optimizer == 'sgd':
-      optimizer = tf.train.GradientDescentOptimizer(self.lrn_rate)
-    elif self.hps.optimizer == 'mom':
-      optimizer = tf.train.MomentumOptimizer(self.lrn_rate, 0.9)
+        # Append on a 'tower' dimension which we will average over below.
+        grads.append(expanded_g)
 
+      # Average over the 'tower' dimension.
+      grad = tf.concat(grads, 0)
+      grad = tf.reduce_mean(grad, 0)
+
+      # Keep in mind that the Variables are redundant because they are shared
+      # across towers. So .. we will just return the first tower's pointer to
+      # the Variable.
+      v = grad_and_vars[0][1]
+      grad_and_var = (grad, v)
+      average_grads.append(grad_and_var)
+    return average_grads
+
+  def _apply_grads(self, optimizer, average_grads):
     apply_op = optimizer.apply_gradients(
-        zip(grads, trainable_variables),
+        average_grads,
         global_step=self.global_step, name='train_step')
 
     train_ops = [apply_op] + self._extra_train_ops

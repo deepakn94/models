@@ -81,7 +81,7 @@ def train(hps):
 
   logging_hook = tf.train.LoggingTensorHook(
       tensors={'step': model.global_step,
-               'loss': model.cost,
+               'loss': model.loss,
                'precision': precision},
       every_n_iter=100)
 
@@ -202,8 +202,6 @@ def main(_):
     dev = '/cpu:0'
   elif FLAGS.num_gpus == 1:
     dev = '/gpu:0'
-  else:
-    raise ValueError('Only support 0 or 1 gpu.')
 
   if FLAGS.mode == 'train':
     batch_size = 128
@@ -235,12 +233,13 @@ def main(_):
                              weight_decay_rate=0.0005,
                              relu_leakiness=0.1,
                              optimizer='mom',
-                             save_checkpoint_secs=FLAGS.save_checkpoint_secs)
+                             save_checkpoint_secs=FLAGS.save_checkpoint_secs,
+                             num_gpus=FLAGS.num_gpus)
 
-  with tf.device(dev):
-    if FLAGS.mode == 'train':
-      train(hps)
-    elif FLAGS.mode == 'eval':
+  if FLAGS.mode == 'train':
+    train(hps)
+  elif FLAGS.mode == 'eval':
+    with tf.device(dev):
       evaluate(hps)
 
 
