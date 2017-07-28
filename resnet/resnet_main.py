@@ -28,6 +28,9 @@ FLAGS = tf.app.flags.FLAGS
 tf.app.flags.DEFINE_string('dataset', 'cifar10', 'cifar10 or cifar100.')
 tf.app.flags.DEFINE_string('mode', 'train', 'train or eval.')
 tf.app.flags.DEFINE_string('model', '', 'model to train.')
+tf.app.flags.DEFINE_string('data_format', 'NHWC',
+                           """Data layout to use: NHWC (TF native)
+                              or NCHW (cuDNN native).""")
 tf.app.flags.DEFINE_string('train_data_path', '',
                            'Filepattern for training data.')
 tf.app.flags.DEFINE_string('eval_data_path', '',
@@ -55,7 +58,7 @@ tf.app.flags.DEFINE_bool('use_bottleneck', False,
 def train(hps):
   """Training loop."""
   images, labels = cifar_input.build_input(
-      FLAGS.dataset, FLAGS.train_data_path, hps.batch_size, FLAGS.mode)
+      FLAGS.dataset, FLAGS.train_data_path, hps.batch_size, FLAGS.mode, hps.data_format)
   model = resnet_model.ResNet(hps, images, labels, FLAGS.mode)
   model.build_graph()
 
@@ -226,6 +229,8 @@ def main(_):
   else:
     raise Exception("Invalid model -- only resnet20, resnet56 and resnet164 supported")
 
+  data_format = FLAGS.data_format
+
   hps = resnet_model.HParams(batch_size=batch_size,
                              num_classes=num_classes,
                              min_lrn_rate=0.0001,
@@ -235,7 +240,8 @@ def main(_):
                              weight_decay_rate=0.0005,
                              relu_leakiness=0.1,
                              optimizer='mom',
-                             save_checkpoint_secs=FLAGS.save_checkpoint_secs)
+                             save_checkpoint_secs=FLAGS.save_checkpoint_secs,
+                             data_format=data_format)
 
   with tf.device(dev):
     if FLAGS.mode == 'train':

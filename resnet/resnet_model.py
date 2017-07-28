@@ -32,7 +32,7 @@ from tensorflow.python.training import moving_averages
 HParams = namedtuple('HParams',
                      'batch_size, num_classes, min_lrn_rate, lrn_rate, '
                      'num_residual_units, use_bottleneck, weight_decay_rate, '
-                     'relu_leakiness, optimizer, save_checkpoint_secs')
+                     'relu_leakiness, optimizer, save_checkpoint_secs, data_format')
 
 
 class ResNet(object):
@@ -64,7 +64,12 @@ class ResNet(object):
 
   def _stride_arr(self, stride):
     """Map a stride scalar to the stride array for tf.nn.conv2d."""
-    return [1, stride, stride, 1]
+    if self.hps.data_format == 'NHWC':
+      return [1, stride, stride, 1]
+    elif self.hps.data_format == 'NCHW':
+      return [1, 1, stride, stride]
+    else:
+      raise Exception("Invalid data_format")
 
   def _build_model(self):
     """Build the core model within the graph."""
@@ -148,48 +153,13 @@ class ResNet(object):
   # TODO(xpan): Consider batch_norm in contrib/layers/python/layers/layers.py
   def _batch_norm(self, name, x):
     """Batch normalization."""
-    with tf.variable_scope(name):
-      params_shape = [x.get_shape()[-1]]
-
-      beta = tf.get_variable(
-          'beta', params_shape, tf.float32,
-          initializer=tf.constant_initializer(0.0, tf.float32))
-      gamma = tf.get_variable(
-          'gamma', params_shape, tf.float32,
-          initializer=tf.constant_initializer(1.0, tf.float32))
-
-      if self.mode == 'train':
-        mean, variance = tf.nn.moments(x, [0, 1, 2], name='moments')
-
-        moving_mean = tf.get_variable(
-            'moving_mean', params_shape, tf.float32,
-            initializer=tf.constant_initializer(0.0, tf.float32),
-            trainable=False)
-        moving_variance = tf.get_variable(
-            'moving_variance', params_shape, tf.float32,
-            initializer=tf.constant_initializer(1.0, tf.float32),
-            trainable=False)
-
-        self._extra_train_ops.append(moving_averages.assign_moving_average(
-            moving_mean, mean, 0.9))
-        self._extra_train_ops.append(moving_averages.assign_moving_average(
-            moving_variance, variance, 0.9))
-      else:
-        mean = tf.get_variable(
-            'moving_mean', params_shape, tf.float32,
-            initializer=tf.constant_initializer(0.0, tf.float32),
-            trainable=False)
-        variance = tf.get_variable(
-            'moving_variance', params_shape, tf.float32,
-            initializer=tf.constant_initializer(1.0, tf.float32),
-            trainable=False)
-        tf.summary.histogram(mean.op.name, mean)
-        tf.summary.histogram(variance.op.name, variance)
-      # epsilon used to be 1e-5. Maybe 0.001 solves NaN problem in deeper net.
-      y = tf.nn.batch_normalization(
-          x, mean, variance, beta, gamma, 0.001)
-      y.set_shape(x.get_shape())
-      return y
+    return tf.contrib.layers.batch_norm(x,
+                                        decay=0.9,
+                                        epsilon=0.001,
+                                        data_format=self.hps.data_format,
+                                        scope=name,
+                                        is_training=(self.mode == 'train'),
+                                        fused=True)
 
   def _residual(self, x, in_filter, out_filter, stride,
                 activate_before_residual=False):
@@ -215,10 +185,16 @@ class ResNet(object):
 
     with tf.variable_scope('sub_add'):
       if in_filter != out_filter:
-        orig_x = tf.nn.avg_pool(orig_x, stride, stride, 'VALID')
-        orig_x = tf.pad(
-            orig_x, [[0, 0], [0, 0], [0, 0],
-                     [(out_filter-in_filter)//2, (out_filter-in_filter)//2]])
+        orig_x = tf.nn.avg_pool(orig_x, stride, stride, 'VALID',
+                                data_format=self.hps.data_format)
+        if self.hps.data_format == 'NHWC':
+          orig_x = tf.pad(
+              orig_x, [[0, 0], [0, 0], [0, 0],
+                       [(out_filter-in_filter)//2, (out_filter-in_filter)//2]])
+        elif self.hps.data_format == 'NCHW':
+          orig_x = tf.pad(
+              orig_x, [[0, 0], [(out_filter-in_filter)//2, (out_filter-in_filter)//2],
+                       [0, 0], [0, 0]])
       x += orig_x
 
     tf.logging.debug('image after unit %s', x.get_shape())
@@ -277,7 +253,8 @@ class ResNet(object):
           'DW', [filter_size, filter_size, in_filters, out_filters],
           tf.float32, initializer=tf.random_normal_initializer(
               stddev=np.sqrt(2.0/n)))
-      return tf.nn.conv2d(x, kernel, strides, padding='SAME')
+      return tf.nn.conv2d(x, kernel, strides, padding='SAME',
+                          data_format=self.hps.data_format)
 
   def _relu(self, x, leakiness=0.0):
     """Relu, with optional leaky support."""
@@ -295,4 +272,7 @@ class ResNet(object):
 
   def _global_avg_pool(self, x):
     assert x.get_shape().ndims == 4
-    return tf.reduce_mean(x, [1, 2])
+    if self.hps.data_format == 'NHWC':
+      return tf.reduce_mean(x, [1, 2])
+    elif self.hps.data_format == 'NCHW':
+      return tf.reduce_mean(x, [2, 3])
