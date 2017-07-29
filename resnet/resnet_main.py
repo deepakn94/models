@@ -137,13 +137,15 @@ def train(hps):
       train_step = run_values.results
       epoch = train_step / num_steps_per_epoch
       if train_step % num_steps_per_epoch == 0:
+        end_time = time.time()
         directory = os.path.join(FLAGS.checkpoint_dir, ("%5d" % epoch).replace(' ', '0'))
         subprocess.call("mkdir -p %s" % directory, shell=True)
         ckpt_name = 'model.ckpt'
         self.saver.save(self.sess, os.path.join(directory, ckpt_name),
                         global_step=train_step)
-        self.f.write("Step: %d\tTime: %s\n" % (train_step, time.time() - self.start_time))
+        self.f.write("Step: %d\tTime: %s\n" % (train_step, end_time - self.start_time))
         print("Saved checkpoint after %d epoch(s) to %s..." % (epoch, directory))
+        self.start_time = time.time()
 
     def end(self, sess):
       self.f.close()
