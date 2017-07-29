@@ -32,7 +32,7 @@ from tensorflow.python.training import moving_averages
 HParams = namedtuple('HParams',
                      'batch_size, num_classes, min_lrn_rate, lrn_rate, '
                      'num_residual_units, use_bottleneck, weight_decay_rate, '
-                     'relu_leakiness, optimizer, save_checkpoint_secs, data_format')
+                     'relu_leakiness, optimizer, data_format')
 
 
 class ResNet(object):

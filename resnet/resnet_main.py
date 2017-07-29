@@ -15,9 +15,11 @@
 
 """ResNet Train/Eval module.
 """
-import time
+import os
 import six
+import subprocess
 import sys
+import time
 
 import cifar_input
 import numpy as np
@@ -45,12 +47,11 @@ tf.app.flags.DEFINE_integer('eval_batch_count', 50,
 tf.app.flags.DEFINE_bool('eval_once', False,
                          'Whether evaluate the model only once.')
 tf.app.flags.DEFINE_string('log_root', '',
-                           'Directory to keep the checkpoints. Should be a '
-                           'parent directory of FLAGS.train_dir/eval_dir.')
+                           'Should be a parent directory of FLAGS.train_dir/eval_dir.')
+tf.app.flags.DEFINE_string('checkpoint_dir', '',
+                           'Directory to store the checkpoints')
 tf.app.flags.DEFINE_integer('num_gpus', 0,
                             'Number of gpus used for training. (0 or 1)')
-tf.app.flags.DEFINE_integer('save_checkpoint_secs', 450,
-                            'The frequency, in seconds, that a checkpoint is saved.')
 tf.app.flags.DEFINE_bool('use_bottleneck', False,
                          'Use bottleneck module or not.')
 
@@ -82,13 +83,13 @@ def train(hps):
       summary_op=tf.summary.merge([model.summaries,
                                    tf.summary.scalar('Precision', precision)]))
 
+  num_steps_per_epoch = 391  # TODO: Don't hardcode this.
+
   logging_hook = tf.train.LoggingTensorHook(
       tensors={'step': model.global_step,
                'loss': model.cost,
                'precision': precision},
       every_n_iter=100)
-
-  num_steps_per_epoch = 391  # TODO: Don't hardcode this.
 
   class _LearningRateSetterHook(tf.train.SessionRunHook):
     """Sets learning_rate based on global step."""
@@ -103,7 +104,6 @@ def train(hps):
 
     def after_run(self, run_context, run_values):
       train_step = run_values.results
-      num_steps_per_epoch = 391
       if train_step < num_steps_per_epoch:
         self._lrn_rate = 0.01
       elif train_step < (91 * num_steps_per_epoch):
@@ -115,18 +115,51 @@ def train(hps):
       else:
         self._lrn_rate = 0.0001
 
+  class _SaverHook(tf.train.SessionRunHook):
+    """Sets learning_rate based on global step."""
+
+    def begin(self):
+      self.saver = tf.train.Saver()
+      subprocess.call("rm -rf %s; mkdir -p %s" % (FLAGS.checkpoint_dir,
+                                                  FLAGS.checkpoint_dir), shell=True)
+      self.f = open(os.path.join(FLAGS.checkpoint_dir, "times.log"), 'w')
+
+    def after_create_session(self, sess, coord):
+      self.sess = sess
+      self.start_time = time.time()
+
+    def before_run(self, run_context):
+      return tf.train.SessionRunArgs(
+          model.global_step  # Asks for global step value.
+      )
+
+    def after_run(self, run_context, run_values):
+      train_step = run_values.results
+      epoch = train_step / num_steps_per_epoch
+      if train_step % num_steps_per_epoch == 0:
+        directory = os.path.join(FLAGS.checkpoint_dir, ("%5d" % epoch).replace(' ', '0'))
+        subprocess.call("mkdir -p %s" % directory, shell=True)
+        ckpt_name = 'model.ckpt'
+        self.saver.save(self.sess, os.path.join(directory, ckpt_name),
+                        global_step=train_step)
+        self.f.write("Step: %d\tTime: %s\n" % (train_step, time.time() - self.start_time))
+        print("Saved checkpoint after %d epoch(s) to %s..." % (epoch, directory))
+
+    def end(self, sess):
+      self.f.close()
+
   with tf.train.MonitoredTrainingSession(
       checkpoint_dir=FLAGS.log_root,
       hooks=[logging_hook, _LearningRateSetterHook()],
-      chief_only_hooks=[summary_hook],
-      save_checkpoint_secs=hps.save_checkpoint_secs,
+      chief_only_hooks=[summary_hook, _SaverHook()],
+      save_checkpoint_secs=None,
       # Since we provide a SummarySaverHook, we need to disable default
       # SummarySaverHook. To do that we set save_summaries_steps to 0.
-      save_summaries_steps=0,
+      save_summaries_steps=None,
+      save_summaries_secs=None,
       config=tf.ConfigProto(allow_soft_placement=True)) as mon_sess:
     for i in range(num_steps_per_epoch * 181):
       mon_sess.run(model.train_op)
-
 
 def evaluate(hps):
   """Eval loop."""
@@ -240,7 +273,6 @@ def main(_):
                              weight_decay_rate=0.0005,
                              relu_leakiness=0.1,
                              optimizer='mom',
-                             save_checkpoint_secs=FLAGS.save_checkpoint_secs,
                              data_format=data_format)
 
   with tf.device(dev):
