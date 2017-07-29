@@ -131,7 +131,7 @@ def train(hps):
 def evaluate(hps):
   """Eval loop."""
   images, labels = cifar_input.build_input(
-      FLAGS.dataset, FLAGS.eval_data_path, hps.batch_size, FLAGS.mode)
+      FLAGS.dataset, FLAGS.eval_data_path, hps.batch_size, FLAGS.mode, hps.data_format)
   model = resnet_model.ResNet(hps, images, labels, FLAGS.mode)
   model.build_graph()
   saver = tf.train.Saver()
