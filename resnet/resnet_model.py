@@ -153,13 +153,16 @@ class ResNet(object):
   # TODO(xpan): Consider batch_norm in contrib/layers/python/layers/layers.py
   def _batch_norm(self, name, x):
     """Batch normalization."""
-    return tf.contrib.layers.batch_norm(x,
-                                        decay=0.9,
-                                        epsilon=0.001,
-                                        data_format=self.hps.data_format,
-                                        scope=name,
-                                        is_training=(self.mode == 'train'),
-                                        fused=True)
+    with tf.variable_scope(name) as scope:
+      output = tf.contrib.layers.batch_norm(x,
+                                            decay=0.9,
+                                            epsilon=0.001,
+                                            data_format=self.hps.data_format,
+                                            scope=scope,
+                                            is_training=(self.mode == 'train'),
+                                            fused=True,
+                                            updates_collections=None)
+    return output
 
   def _residual(self, x, in_filter, out_filter, stride,
                 activate_before_residual=False):
