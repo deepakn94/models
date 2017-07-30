@@ -119,7 +119,7 @@ def train(hps):
     """Sets learning_rate based on global step."""
 
     def begin(self):
-      self.saver = tf.train.Saver()
+      self.saver = tf.train.Saver(max_to_keep=10000)
       subprocess.call("rm -rf %s; mkdir -p %s" % (FLAGS.checkpoint_dir,
                                                   FLAGS.checkpoint_dir), shell=True)
       self.f = open(os.path.join(FLAGS.checkpoint_dir, "times.log"), 'w')
@@ -145,6 +145,7 @@ def train(hps):
                         global_step=train_step)
         self.f.write("Step: %d\tTime: %s\n" % (train_step, end_time - self.start_time))
         print("Saved checkpoint after %d epoch(s) to %s..." % (epoch, directory))
+        sys.stdout.flush()
         self.start_time = time.time()
 
     def end(self, sess):
